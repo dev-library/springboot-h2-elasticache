@@ -35,7 +35,13 @@ public class RedisConfig {
     public ObjectMapper objectMapper() {
         ObjectMapper mapper = new ObjectMapper();
         mapper.registerModule(new JavaTimeModule());
-        mapper.registerModule(new Hibernate6Module());
+        
+        // Hibernate6Module 설정
+        Hibernate6Module hibernate6Module = new Hibernate6Module();
+        hibernate6Module.disable(Hibernate6Module.Feature.USE_TRANSIENT_ANNOTATION);
+        hibernate6Module.enable(Hibernate6Module.Feature.FORCE_LAZY_LOADING); // Lazy 프록시 강제 로드
+        mapper.registerModule(hibernate6Module);
+        
         mapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
         mapper.activateDefaultTyping(
                 mapper.getPolymorphicTypeValidator(),

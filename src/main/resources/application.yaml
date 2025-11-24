@@ -1,3 +1,4 @@
+
 spring:
     application:
         name: elasticache-app
@@ -11,7 +12,10 @@ spring:
         hibernate:
             ddl-auto: create
         show-sql: false
+        open-in-view: true
     data:
         redis:
             host: localhost
             port: 6379
+server:
+    port: 8080

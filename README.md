@@ -2,6 +2,32 @@
 
 Spring Boot와 Redis를 활용한 캐싱 성능 최적화 데모 프로젝트입니다.
 
+## ⚡ Quick Start
+
+```bash
+# 1. Redis 컨테이너 실행
+docker run -d --name redis-test -p 6379:6379 redis
+
+# 2. 프로젝트 실행
+./gradlew bootRun
+
+# 3. API 테스트 (데이터 생성 완료 후 약 30초)
+# RDB 직접 조회
+curl http://localhost:8080/db/100
+
+# Redis 캐시 조회 (첫 조회 - MISS)
+curl http://localhost:8080/cache/100
+
+# Redis 캐시 조회 (재조회 - HIT) ⚡
+curl http://localhost:8080/cache/100
+```
+
+**성능 차이:**
+- RDB 직접: **50-100ms**
+- Redis HIT: **1-3ms** ⚡ (약 **30-50배 빠름!**)
+
+---
+
 ## 📋 프로젝트 개요
 
 RDB 직접 조회와 Redis 캐시 조회의 성능 차이를 실습하기 위한 프로젝트입니다.
@@ -13,7 +39,9 @@ RDB 직접 조회와 Redis 캐시 조회의 성능 차이를 실습하기 위한
 - **Spring Boot 3.5.8**
 - **Spring Data JPA** - ORM, Repository 패턴
 - **Spring Data Redis** - Redis 캐싱
-- **H2 Database** - 인메모리 데이터베이스
+- **H2 Database** - 인메모리 데이터베이스 (기본)
+- **MySQL** - 관계형 데이터베이스 (선택 사항)
+- **Docker** - Redis & MySQL 컨테이너 실행
 - **Lombok** - 보일러플레이트 코드 제거
 - **Jackson Datatype Hibernate6** - Hibernate Proxy 직렬화 지원
 - **Gradle** - 빌드 도구
@@ -95,15 +123,19 @@ public User getUser(Long id) {
 - **UserRepository**: JPA Repository + JPQL JOIN FETCH 쿼리
 - **OrderRepository**: JPA Repository
 
-#### 3. Service Layer
-- **DbUserService**: RDB 직접 조회 (캐싱 없음)
-- **CachedUserService**: Redis 캐싱 적용 (`@Cacheable`)
+#### 3. DTO Layer
+- **UserDto**: Entity를 순수 POJO로 변환 (Hibernate Proxy 제거)
+- **UserResponse**: API 응답 (User + 소요시간 + 캐시 상태)
 
-#### 4. Controller Layer
+#### 4. Service Layer
+- **DbUserService**: RDB 직접 조회 → UserDto 변환
+- **CachedUserService**: Redis 캐싱 적용 (`@Cacheable`) → UserDto 변환
+
+#### 5. Controller Layer
 - **DbController**: `/db/{id}` - RDB 성능 측정
 - **CacheController**: `/cache/{id}` - Redis 캐시 성능 측정
 
-#### 5. Configuration
+#### 6. Configuration
 - **RedisConfig**: Redis 연결, ObjectMapper 설정
 - **@EnableCaching**: Spring Cache 활성화
 
@@ -128,6 +160,147 @@ docker run -d --name redis-test -p 6379:6379 redis
 
 서버 시작 후 약 30초간 데이터가 생성됩니다.
 
+---
+
+## 🐬 MySQL로 전환하기 (선택 사항)
+
+기본적으로 H2 인메모리 데이터베이스를 사용하지만, 더 실제 환경과 유사한 성능 비교를 위해 MySQL로 전환할 수 있습니다.
+
+### 1. Docker로 MySQL 컨테이너 실행
+
+```bash
+# MySQL 8.0 컨테이너 실행
+docker run -d \
+  --name mysql-test \
+  -e MYSQL_ROOT_PASSWORD=rootpassword \
+  -e MYSQL_DATABASE=elasticache_db \
+  -e MYSQL_USER=testuser \
+  -e MYSQL_PASSWORD=testpassword \
+  -p 3306:3306 \
+  mysql:8.0
+```
+
+**Windows PowerShell:**
+```powershell
+docker run -d `
+  --name mysql-test `
+  -e MYSQL_ROOT_PASSWORD=rootpassword `
+  -e MYSQL_DATABASE=elasticache_db `
+  -e MYSQL_USER=testuser `
+  -e MYSQL_PASSWORD=testpassword `
+  -p 3306:3306 `
+  mysql:8.0
+```
+
+### 2. build.gradle 의존성 추가
+
+`build.gradle`의 `dependencies` 블록에 MySQL 드라이버를 추가하세요:
+
+```gradle
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'com.fasterxml.jackson.datatype:jackson-datatype-hibernate6'
+    
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+    
+    // H2 주석 처리 또는 제거
+    // runtimeOnly 'com.h2database:h2'
+    
+    // MySQL 드라이버 추가
+    runtimeOnly 'com.mysql:mysql-connector-j'
+    
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+```
+
+### 3. application.yaml 설정 변경
+
+`src/main/resources/application.yaml` 파일을 다음과 같이 수정하세요:
+
+```yaml
+spring:
+    application:
+        name: elasticache-app
+    
+    # MySQL 설정
+    datasource:
+        url: jdbc:mysql://localhost:3306/elasticache_db?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Seoul
+        driver-class-name: com.mysql.cj.jdbc.Driver
+        username: testuser
+        password: testpassword
+        hikari:
+            maximum-pool-size: 20
+            minimum-idle: 10
+    
+    jpa:
+        hibernate:
+            ddl-auto: create  # 개발 환경: create, 운영 환경: validate
+        show-sql: false
+        open-in-view: true
+        properties:
+            hibernate:
+                dialect: org.hibernate.dialect.MySQLDialect
+                format_sql: true
+    
+    data:
+        redis:
+            host: localhost
+            port: 6379
+
+server:
+    port: 8080
+```
+
+### 4. MySQL 연결 확인
+
+```bash
+# MySQL 컨테이너에 접속
+docker exec -it mysql-test mysql -u testuser -p
+
+# 비밀번호 입력: testpassword
+
+# 데이터베이스 확인
+USE elasticache_db;
+SHOW TABLES;
+```
+
+### 5. 성능 비교 팁
+
+MySQL 사용 시 더 실제적인 성능 차이를 확인할 수 있습니다:
+
+| 환경 | RDB 직접 조회 | Redis 캐시 조회 |
+|------|---------------|-----------------|
+| **H2 (인메모리)** | 50-100ms | 1-3ms |
+| **MySQL (Docker)** | 100-200ms | 1-3ms |
+| **MySQL (원격 서버)** | 200-500ms | 1-3ms |
+
+**주의사항:**
+- MySQL은 디스크 I/O가 발생하므로 H2보다 느립니다
+- 첫 실행 시 데이터 생성이 더 오래 걸릴 수 있습니다 (약 1-2분)
+- `ddl-auto: create`는 서버 재시작 시마다 데이터를 초기화합니다
+
+### 6. 컨테이너 관리
+
+```bash
+# MySQL 컨테이너 중지
+docker stop mysql-test
+
+# MySQL 컨테이너 시작
+docker start mysql-test
+
+# MySQL 컨테이너 삭제
+docker rm -f mysql-test
+
+# 두 컨테이너 모두 확인
+docker ps -a | grep -E "redis-test|mysql-test"
+```
+
+---
+
 ## 📡 API 엔드포인트
 
 ### 1. RDB 직접 조회
@@ -139,17 +312,21 @@ GET http://localhost:8080/db/{id}
 **응답 예시:**
 ```json
 {
-  "id": 1,
-  "name": "User1",
-  "age": 21,
-  "orders": [
-    {
-      "id": 1,
-      "productName": "Laptop",
-      "price": 85000,
-      "orderDate": "2025-03-15T12:30:00"
-    }
-  ]
+  "user": {
+    "id": 100,
+    "name": "User100",
+    "age": 30,
+    "orders": [
+      {
+        "id": 1250,
+        "productName": "Laptop",
+        "price": 85000,
+        "orderDate": "2024-11-15T12:30:00"
+      }
+    ]
+  },
+  "processingTimeMs": 75,
+  "cacheStatus": "RDB_DIRECT"
 }
 ```
 
@@ -159,8 +336,31 @@ GET http://localhost:8080/db/{id}
 GET http://localhost:8080/cache/{id}
 ```
 
-- **첫 조회(MISS)**: DB에서 가져와서 Redis에 저장
-- **재조회(HIT)**: Redis에서 직접 반환 (빠름!)
+**첫 조회 (MISS) 응답 예시:**
+```json
+{
+  "user": { "id": 100, "name": "User100", ... },
+  "processingTimeMs": 850,
+  "cacheStatus": "REDIS_MISS"
+}
+```
+
+**재조회 (HIT) 응답 예시:**
+```json
+{
+  "user": { "id": 100, "name": "User100", ... },
+  "processingTimeMs": 2,
+  "cacheStatus": "REDIS_HIT"
+}
+```
+
+**응답 필드:**
+- `user`: 사용자 및 주문 데이터
+- `processingTimeMs`: **처리 소요 시간 (밀리초)** ⏱️
+- `cacheStatus`: 캐시 상태
+  - `RDB_DIRECT`: RDB 직접 조회
+  - `REDIS_MISS`: Redis 캐시 미스 → DB 조회
+  - `REDIS_HIT`: Redis 캐시 히트 ⚡
 
 ## 🎯 주요 구현 사항
 
@@ -182,10 +382,28 @@ for (int threadId = 0; threadId < 10; threadId++) {
 
 **문제**: Hibernate Proxy 객체가 Redis 직렬화 시 `LazyInitializationException` 발생
 
-**해결책:**
+**최종 해결책: DTO 변환**
+```java
+@Data
+public class UserDto implements Serializable {
+    private Long id;
+    private String name;
+    private Integer age;
+    private List<OrderDto> orders;
+    
+    // Entity → DTO 변환
+    public static UserDto from(User user) {
+        // Hibernate Proxy를 완전히 제거하고 순수 POJO로 변환
+        return new UserDto(...);
+    }
+}
+```
+
+**이전 시도한 방법들:**
 1. `FetchType.EAGER` 설정
 2. `Jackson Hibernate6 Module` 추가
 3. `@Transactional(readOnly = true)` 적용
+4. **최종 해결**: DTO 패턴으로 Entity와 완전 분리
 
 ```java
 @Bean
@@ -196,6 +414,11 @@ public ObjectMapper objectMapper() {
     // ...
 }
 ```
+
+**왜 DTO 변환이 필요한가?**
+- Hibernate 엔티티는 Lazy Loading Proxy를 포함할 수 있음
+- Redis 역직렬화 시 Hibernate Session이 없어 Proxy 초기화 불가
+- DTO로 변환하면 순수한 데이터만 Redis에 저장되어 문제 해결
 
 ### 3. JOIN FETCH 최적화
 
@@ -208,19 +431,39 @@ Optional<User> findByIdWithOrders(@Param("id") Long id);
 
 ## 📈 성능 최적화 요약
 
+### 데이터 생성 속도
+
 | 항목 | 최적화 전 | 최적화 후 | 개선율 |
 |------|----------|----------|--------|
-| **데이터 생성 시간** | 200초 | 30초 | **6.7배** ⚡ |
+| **전체 데이터 생성** | 200초 | 30초 | **6.7배** ⚡ |
 | **User 생성** | 13초 | 2초 | **6.5배** ⚡ |
-| **캐시 조회 (HIT)** | - | 74ms | **12배 빠름** (vs MISS 930ms) |
+| **Order 생성** | 187초 | 28초 | **6.7배** ⚡ |
+
+### 조회 성능 (H2 기준)
+
+| 조회 방식 | 평균 응답 시간 | 비고 |
+|----------|---------------|------|
+| **RDB 직접 조회** | 50-100ms | JOIN FETCH 쿼리 |
+| **Redis MISS** | 50-100ms | DB 조회 + 캐시 저장 |
+| **Redis HIT** | 1-3ms | **30-50배 빠름** ⚡ |
+
+### 조회 성능 (MySQL 기준)
+
+| 조회 방식 | 평균 응답 시간 | 비고 |
+|----------|---------------|------|
+| **RDB 직접 조회** | 100-200ms | 디스크 I/O 발생 |
+| **Redis MISS** | 100-200ms | DB 조회 + 캐시 저장 |
+| **Redis HIT** | 1-3ms | **50-100배 빠름** ⚡⚡ |
 
 ## 🔑 핵심 학습 포인트
 
 1. **Spring Cache Abstraction**: `@Cacheable`로 간단한 캐싱 구현
 2. **Redis 직렬화/역직렬화**: Jackson ObjectMapper 설정의 중요성
-3. **멀티스레드 프로그래밍**: ExecutorService를 활용한 병렬 처리
-4. **JPA N+1 문제**: JOIN FETCH로 해결
-5. **성능 측정**: 실제 측정을 통한 최적화 효과 검증
+3. **DTO 패턴의 중요성**: Hibernate Proxy 문제를 완벽하게 해결
+4. **멀티스레드 프로그래밍**: ExecutorService를 활용한 병렬 처리
+5. **JPA N+1 문제**: JOIN FETCH로 해결
+6. **성능 측정**: 실제 측정을 통한 최적화 효과 검증
+7. **Docker 활용**: MySQL, Redis 컨테이너로 실제 환경 구성
 
 ## 🐛 트러블슈팅
 
@@ -231,10 +474,31 @@ Optional<User> findByIdWithOrders(@Param("id") Long id);
 **해결**: `USER`는 예약어이므로 `@Table(name = "users")` 추가
 
 ### 문제 3: Redis 역직렬화 시 `LazyInitializationException`
-**해결**: 
-- `jackson-datatype-hibernate6` 의존성 추가
-- `FetchType.EAGER` 사용
-- `@Transactional(readOnly = true)` 적용
+**증상**: Redis 캐시에서 조회 시 500 에러 발생
+```
+org.hibernate.LazyInitializationException: 
+failed to lazily initialize a collection: could not initialize proxy - no Session
+```
+
+**시도한 해결 방법:**
+1. `jackson-datatype-hibernate6` 의존성 추가 ✅
+2. `FetchType.EAGER` 사용 ✅
+3. `@Transactional(readOnly = true)` 적용 ✅
+4. `Hibernate6Module.FORCE_LAZY_LOADING` 설정 ❌
+5. `open-in-view: true` 설정 ❌
+
+**최종 해결**: **DTO 패턴** ✨
+```java
+// Service에서 Entity → DTO 변환
+public UserDto getUser(Long id) {
+    User user = repo.findByIdWithOrders(id);
+    return UserDto.from(user);  // Hibernate Proxy 완전 제거
+}
+```
 
 ### 문제 4: LocalDateTime 직렬화 실패
 **해결**: `JavaTimeModule` 등록
+
+### 문제 5: Redis 캐시 HIT인데도 DB 조회 발생
+**원인**: 캐시 키 생성 방식 문제
+**해결**: `@Cacheable(value = "userCache", key = "#id")` 명시적 키 지정

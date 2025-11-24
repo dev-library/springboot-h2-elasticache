@@ -1,5 +1,6 @@
 package ac.gachon.elasticacheapp.service;
 
+import ac.gachon.elasticacheapp.dto.UserDto;
 import ac.gachon.elasticacheapp.entity.User;
 import ac.gachon.elasticacheapp.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -13,17 +14,15 @@ public class DbUserService {
     private final UserRepository repo;
 
     @Transactional(readOnly = true)
-    public User getUser(Long id) {
+    public UserDto getUser(Long id) {
         System.out.println(">>> RDB HIT (JOIN FETCH)");
         // JOIN FETCH를 사용하여 User와 Orders를 한 번에 조회
         User user = repo.findByIdWithOrders(id)
                 .orElseThrow(() -> new RuntimeException("Not Found"));
         
-        // Orders를 명시적으로 로드
-        user.getOrders().size();
-        
         System.out.println(">>> Orders count: " + user.getOrders().size());
         
-        return user;
+        // DTO로 변환하여 반환 (Hibernate 프록시 완전 제거)
+        return UserDto.from(user);
     }
 }
