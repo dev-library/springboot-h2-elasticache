@@ -1,0 +1,17 @@
+spring:
+    application:
+        name: elasticache-app
+    datasource:
+        url: jdbc:h2:mem:testdb
+        driver-class-name: org.h2.Driver
+        username: sa
+        password:
+
+    jpa:
+        hibernate:
+            ddl-auto: create
+        show-sql: false
+    data:
+        redis:
+            host: localhost
+            port: 6379
